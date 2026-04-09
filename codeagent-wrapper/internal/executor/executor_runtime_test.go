@@ -154,7 +154,11 @@ func TestRunCodexTaskWithContext_IgnoresWrapperTimeoutAndWaitsForExit(t *testing
 	start := time.Now()
 	result := RunCodexTaskWithContext(
 		context.Background(),
-		TaskSpec{ID: "task-1", Task: "hi", WorkDir: "."},
+		TaskSpec{
+			ID:      "task-1",
+			Task:    "hi",
+			WorkDir: ".",
+		},
 		nil,
 		"codex",
 		func(*Config, string) []string { return []string{"--json", "hi"} },
@@ -199,7 +203,11 @@ func TestRunCodexTaskWithContext_CancelledContextTerminatesProcess(t *testing.T)
 
 	result := RunCodexTaskWithContext(
 		ctx,
-		TaskSpec{ID: "task-cancel", Task: "hi", WorkDir: "."},
+		TaskSpec{
+			ID:      "task-cancel",
+			Task:    "hi",
+			WorkDir: ".",
+		},
 		nil,
 		"codex",
 		func(*Config, string) []string { return []string{"--json", "hi"} },

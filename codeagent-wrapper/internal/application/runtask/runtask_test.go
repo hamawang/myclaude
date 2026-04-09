@@ -5,20 +5,19 @@ import (
 	"strings"
 	"testing"
 
-	config "codeagent-wrapper/internal/config"
-	executor "codeagent-wrapper/internal/executor"
+	domaintask "codeagent-wrapper/internal/domain/task"
 )
 
 func TestPreparePlanBuildsTaskSpecAndCommand(t *testing.T) {
-	cfg := &config.Config{Task: "body", Backend: "codex", WorkDir: ".", ExplicitStdin: false}
+	cmd := Command{Task: "body", Backend: "codex", WorkDir: ".", ExplicitStdin: false}
 
-	plan, err := PreparePlan(cfg, PrepareDeps{
-		ResolveTaskText: func(*config.Config) (string, bool, error) { return "body", false, nil },
-		ApplyPromptAndSkills: func(_ *config.Config, task string) (string, error) {
+	plan, err := PreparePlan(cmd, PrepareDeps{
+		ResolveTaskText: func(Command) (string, bool, error) { return "body", false, nil },
+		ApplyPromptAndSkills: func(_ Command, task string) (string, error) {
 			return task + "\nextra", nil
 		},
 		ShouldUseStdin:   func(task string, piped bool) bool { return strings.Contains(task, "\n") || piped },
-		BuildCommandArgs: func(_ *config.Config, target string) []string { return []string{"exec", target} },
+		BuildCommandArgs: func(_ Command, target string) []string { return []string{"exec", target} },
 	})
 	if err != nil {
 		t.Fatalf("PreparePlan() error = %v", err)
@@ -35,20 +34,20 @@ func TestPreparePlanBuildsTaskSpecAndCommand(t *testing.T) {
 }
 
 func TestExecutePlanUsesSharedExecutor(t *testing.T) {
-	plan := Plan{TaskSpec: executor.TaskSpec{Task: "body"}}
-	var gotLayers [][]executor.TaskSpec
-	var gotTask executor.TaskSpec
+	plan := Plan{TaskSpec: Spec{Task: "body"}}
+	var gotLayers [][]Spec
+	var gotTask Spec
 
 	result, err := ExecutePlan(context.Background(), plan, ExecuteDeps{
-		ExecuteTaskLayers: func(_ context.Context, layers [][]executor.TaskSpec, maxWorkers int, runTask func(executor.TaskSpec, int) executor.TaskResult) []executor.TaskResult {
+		ExecuteTaskLayers: func(_ context.Context, layers [][]Spec, maxWorkers int, runTask func(Spec, int) domaintask.TaskResult) []domaintask.TaskResult {
 			gotLayers = layers
-			return []executor.TaskResult{runTask(layers[0][0], 0)}
+			return []domaintask.TaskResult{runTask(layers[0][0], 0)}
 		},
-		RunTask: func(task executor.TaskSpec, timeout int) executor.TaskResult {
+		RunTask: func(task Spec, timeout int) domaintask.TaskResult {
 			gotTask = task
-			return executor.TaskResult{Message: "ok"}
+			return domaintask.TaskResult{Message: "ok"}
 		},
-		EnrichResults: func([]executor.TaskResult) {},
+		EnrichResults: func([]domaintask.TaskResult) {},
 	})
 	if err != nil {
 		t.Fatalf("ExecutePlan() error = %v", err)

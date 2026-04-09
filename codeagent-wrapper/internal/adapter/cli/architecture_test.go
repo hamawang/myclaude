@@ -1,4 +1,4 @@
-package wrapper
+package cli
 
 import (
 	"go/parser"
@@ -9,9 +9,30 @@ import (
 	"testing"
 )
 
-func TestAppAvoidsLegacyBackendAndLoggerImports(t *testing.T) {
-	root := projectRootForApp(t)
-	files, err := filepath.Glob(filepath.Join(root, "internal", "app", "*.go"))
+func TestMainImportsBootstrapDirectly(t *testing.T) {
+	root := projectRoot(t)
+	path := filepath.Join(root, "cmd", "codeagent-wrapper", "main.go")
+	imports := parseImports(t, path)
+	if len(imports) != 1 || !slices.Contains(imports, "codeagent-wrapper/internal/bootstrap") {
+		t.Fatalf("%s imports = %v, want [codeagent-wrapper/internal/bootstrap]", path, imports)
+	}
+}
+
+func TestBootstrapComposesAppAndCLIAdapter(t *testing.T) {
+	root := projectRoot(t)
+	path := filepath.Join(root, "internal", "bootstrap", "bootstrap.go")
+	imports := parseImports(t, path)
+	if len(imports) != 3 ||
+		!slices.Contains(imports, "os") ||
+		!slices.Contains(imports, "codeagent-wrapper/internal/adapter/cli") ||
+		!slices.Contains(imports, "codeagent-wrapper/internal/app") {
+		t.Fatalf("%s imports = %v, want os + internal/adapter/cli + internal/app", path, imports)
+	}
+}
+
+func TestCLIAdapterDoesNotImportAppOrBootstrap(t *testing.T) {
+	root := projectRoot(t)
+	files, err := filepath.Glob(filepath.Join(root, "internal", "adapter", "cli", "*.go"))
 	if err != nil {
 		t.Fatalf("Glob(): %v", err)
 	}
@@ -22,56 +43,17 @@ func TestAppAvoidsLegacyBackendAndLoggerImports(t *testing.T) {
 			continue
 		}
 
-		imports := parseAppImports(t, path)
-		for _, imp := range imports {
-			switch imp {
-			case "codeagent-wrapper/internal/backend", "codeagent-wrapper/internal/logger":
-				t.Fatalf("%s imports legacy package %q", base, imp)
-			}
-		}
-	}
-}
-
-func TestMainImportsBootstrapDirectly(t *testing.T) {
-	root := projectRootForApp(t)
-	path := filepath.Join(root, "cmd", "codeagent-wrapper", "main.go")
-	imports := parseAppImports(t, path)
-	if len(imports) != 1 || !slices.Contains(imports, "codeagent-wrapper/internal/bootstrap") {
-		t.Fatalf("%s imports = %v, want [codeagent-wrapper/internal/bootstrap]", path, imports)
-	}
-}
-
-func TestBootstrapComposesAppAndCLIAdapter(t *testing.T) {
-	root := projectRootForApp(t)
-	path := filepath.Join(root, "internal", "bootstrap", "bootstrap.go")
-	imports := parseAppImports(t, path)
-	if len(imports) != 3 ||
-		!slices.Contains(imports, "os") ||
-		!slices.Contains(imports, "codeagent-wrapper/internal/adapter/cli") ||
-		!slices.Contains(imports, "codeagent-wrapper/internal/app") {
-		t.Fatalf("%s imports = %v, want os + internal/adapter/cli + internal/app", path, imports)
-	}
-}
-
-func TestCLIAdapterDoesNotImportAppOrBootstrap(t *testing.T) {
-	root := projectRootForApp(t)
-	files, err := filepath.Glob(filepath.Join(root, "internal", "adapter", "cli", "*.go"))
-	if err != nil {
-		t.Fatalf("Glob(): %v", err)
-	}
-
-	for _, path := range files {
-		imports := parseAppImports(t, path)
+		imports := parseImports(t, path)
 		for _, imp := range imports {
 			switch imp {
 			case "codeagent-wrapper/internal/app", "codeagent-wrapper/internal/bootstrap":
-				t.Fatalf("%s imports forbidden entry package %q", filepath.Base(path), imp)
+				t.Fatalf("%s imports forbidden entry package %q", base, imp)
 			}
 		}
 	}
 }
 
-func parseAppImports(t *testing.T, path string) []string {
+func parseImports(t *testing.T, path string) []string {
 	t.Helper()
 
 	fset := token.NewFileSet()
@@ -87,10 +69,10 @@ func parseAppImports(t *testing.T, path string) []string {
 	return imports
 }
 
-func projectRootForApp(t *testing.T) string {
+func projectRoot(t *testing.T) string {
 	t.Helper()
 
-	root, err := filepath.Abs(filepath.Join("..", ".."))
+	root, err := filepath.Abs(filepath.Join("..", "..", ".."))
 	if err != nil {
 		t.Fatalf("Abs(): %v", err)
 	}

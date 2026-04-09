@@ -394,72 +394,6 @@ func DefaultRunCodexTaskFn(task TaskSpec, timeout int) TaskResult {
 	return RunCodexTaskWithContext(parentCtx, task, backend, "", nil, nil, false, true, timeout)
 }
 
-func TopologicalSort(tasks []TaskSpec) ([][]TaskSpec, error) {
-	idToTask := make(map[string]TaskSpec, len(tasks))
-	indegree := make(map[string]int, len(tasks))
-	adj := make(map[string][]string, len(tasks))
-
-	for _, task := range tasks {
-		idToTask[task.ID] = task
-		indegree[task.ID] = 0
-	}
-
-	for _, task := range tasks {
-		for _, dep := range task.Dependencies {
-			if _, ok := idToTask[dep]; !ok {
-				return nil, fmt.Errorf("dependency %q not found for task %q", dep, task.ID)
-			}
-			indegree[task.ID]++
-			adj[dep] = append(adj[dep], task.ID)
-		}
-	}
-
-	queue := make([]string, 0, len(tasks))
-	for _, task := range tasks {
-		if indegree[task.ID] == 0 {
-			queue = append(queue, task.ID)
-		}
-	}
-
-	layers := make([][]TaskSpec, 0)
-	processed := 0
-
-	for len(queue) > 0 {
-		current := queue
-		queue = nil
-		layer := make([]TaskSpec, len(current))
-		for i, id := range current {
-			layer[i] = idToTask[id]
-			processed++
-		}
-		layers = append(layers, layer)
-
-		next := make([]string, 0)
-		for _, id := range current {
-			for _, neighbor := range adj[id] {
-				indegree[neighbor]--
-				if indegree[neighbor] == 0 {
-					next = append(next, neighbor)
-				}
-			}
-		}
-		queue = append(queue, next...)
-	}
-
-	if processed != len(tasks) {
-		cycleIDs := make([]string, 0)
-		for id, deg := range indegree {
-			if deg > 0 {
-				cycleIDs = append(cycleIDs, id)
-			}
-		}
-		sort.Strings(cycleIDs)
-		return nil, fmt.Errorf("cycle detected involving tasks: %s", strings.Join(cycleIDs, ","))
-	}
-
-	return layers, nil
-}
-
 func ExecuteConcurrent(layers [][]TaskSpec, timeout int, runTask func(TaskSpec, int) TaskResult) []TaskResult {
 	maxWorkers := config.ResolveMaxParallelWorkers()
 	return ExecuteConcurrentWithContext(context.Background(), layers, timeout, maxWorkers, runTask)
@@ -570,7 +504,7 @@ func ExecuteConcurrentWithContext(parentCtx context.Context, layers [][]TaskSpec
 				handle := taskLoggerHandle{}
 				defer func() {
 					if r := recover(); r != nil {
-						resultsCh <- TaskResult{TaskID: ts.ID, ExitCode: 1, Error: fmt.Sprintf("panic: %v", r), LogPath: taskLogPath, sharedLog: handle.shared}
+						resultsCh <- TaskResult{TaskID: ts.ID, ExitCode: 1, Error: fmt.Sprintf("panic: %v", r), LogPath: taskLogPath, SharedLog: handle.shared}
 					}
 				}()
 
@@ -609,7 +543,7 @@ func ExecuteConcurrentWithContext(parentCtx context.Context, layers [][]TaskSpec
 				}
 				// 只有当最终的 LogPath 确实是共享 logger 的路径时才标记为 shared
 				if handle.shared && handle.logger != nil && res.LogPath == handle.logger.Path() {
-					res.sharedLog = true
+					res.SharedLog = true
 				}
 				resultsCh <- res
 			}(task)
@@ -844,7 +778,7 @@ func GenerateFinalOutputWithMode(results []TaskResult, summaryOnly bool) string 
 			}
 			if res.LogPath != "" {
 				logPath := sanitizeOutput(res.LogPath)
-				if res.sharedLog {
+				if res.SharedLog {
 					sb.WriteString(fmt.Sprintf("Log: %s (shared)\n", logPath))
 				} else {
 					sb.WriteString(fmt.Sprintf("Log: %s\n", logPath))

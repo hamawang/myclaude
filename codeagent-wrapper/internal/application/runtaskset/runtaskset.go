@@ -6,14 +6,20 @@ import (
 	"strings"
 
 	appoutput "codeagent-wrapper/internal/application/output"
-	executor "codeagent-wrapper/internal/executor"
+	appruntask "codeagent-wrapper/internal/application/runtask"
+	domaintask "codeagent-wrapper/internal/domain/task"
 )
 
 type Plan struct {
 	OutputPath  string
 	SummaryOnly bool
-	Layers      [][]executor.TaskSpec
+	Layers      [][]appruntask.Spec
 	MaxWorkers  int
+}
+
+type ParallelConfig struct {
+	Tasks         []appruntask.Spec
+	GlobalBackend string
 }
 
 type BuildInput struct {
@@ -28,15 +34,14 @@ type BuildInput struct {
 
 type BuildDeps struct {
 	ResolveBackendName func(string) (string, error)
-	ParseConfig        func([]byte) (*executor.ParallelConfig, error)
-	TopologicalSort    func([]executor.TaskSpec) ([][]executor.TaskSpec, error)
+	ParseConfig        func([]byte) (*ParallelConfig, error)
+	TopologicalSort    func([]domaintask.TaskSpec) ([][]domaintask.TaskSpec, error)
 }
 
 type RunDeps struct {
-	ExecuteConcurrent         func(context.Context, [][]executor.TaskSpec, int, int) []executor.TaskResult
-	EnrichResults             func([]executor.TaskResult)
-	RenderFinalOutputWithMode func([]executor.TaskResult, bool) string
-	NoExecutionTimeout        int
+	ExecuteConcurrent         func(context.Context, [][]appruntask.Spec, int) []domaintask.TaskResult
+	EnrichResults             func([]domaintask.TaskResult)
+	RenderFinalOutputWithMode func([]domaintask.TaskResult, bool) string
 }
 
 func BuildPlan(input BuildInput, deps BuildDeps) (Plan, error) {
@@ -62,9 +67,28 @@ func BuildPlan(input BuildInput, deps BuildDeps) (Plan, error) {
 		cfg.Tasks[i].SkipPermissions = cfg.Tasks[i].SkipPermissions || input.SkipPermissions
 	}
 
-	layers, err := deps.TopologicalSort(cfg.Tasks)
+	domainTasks := make([]domaintask.TaskSpec, len(cfg.Tasks))
+	byID := make(map[string]appruntask.Spec, len(cfg.Tasks))
+	for i := range cfg.Tasks {
+		domainTasks[i] = domaintask.TaskSpec{
+			ID:           cfg.Tasks[i].ID,
+			Task:         cfg.Tasks[i].Task,
+			Dependencies: append([]string(nil), cfg.Tasks[i].Dependencies...),
+		}
+		byID[cfg.Tasks[i].ID] = cfg.Tasks[i]
+	}
+
+	sorted, err := deps.TopologicalSort(domainTasks)
 	if err != nil {
 		return Plan{}, err
+	}
+
+	layers := make([][]appruntask.Spec, len(sorted))
+	for i := range sorted {
+		layers[i] = make([]appruntask.Spec, len(sorted[i]))
+		for j := range sorted[i] {
+			layers[i][j] = byID[sorted[i][j].ID]
+		}
 	}
 
 	return Plan{
@@ -76,7 +100,7 @@ func BuildPlan(input BuildInput, deps BuildDeps) (Plan, error) {
 }
 
 func RunPlan(parentCtx context.Context, plan Plan, deps RunDeps) (string, int, error) {
-	results := deps.ExecuteConcurrent(parentCtx, plan.Layers, deps.NoExecutionTimeout, plan.MaxWorkers)
+	results := deps.ExecuteConcurrent(parentCtx, plan.Layers, plan.MaxWorkers)
 	deps.EnrichResults(results)
 
 	if err := appoutput.WriteStructuredOutput(plan.OutputPath, results); err != nil {
@@ -93,6 +117,6 @@ func RunPlan(parentCtx context.Context, plan Plan, deps RunDeps) (string, int, e
 	return deps.RenderFinalOutputWithMode(results, plan.SummaryOnly), exitCode, nil
 }
 
-func PanicTaskResult(taskID string, recovered any) executor.TaskResult {
-	return executor.TaskResult{TaskID: taskID, ExitCode: 1, Error: fmt.Sprintf("panic: %v", recovered)}
+func PanicTaskResult(taskID string, recovered any) domaintask.TaskResult {
+	return domaintask.TaskResult{TaskID: taskID, ExitCode: 1, Error: fmt.Sprintf("panic: %v", recovered)}
 }

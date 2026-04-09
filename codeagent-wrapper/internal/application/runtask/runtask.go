@@ -5,12 +5,11 @@ import (
 	"fmt"
 	"strings"
 
-	config "codeagent-wrapper/internal/config"
-	executor "codeagent-wrapper/internal/executor"
+	domaintask "codeagent-wrapper/internal/domain/task"
 )
 
 type Plan struct {
-	TaskSpec  executor.TaskSpec
+	TaskSpec  Spec
 	TaskText  string
 	TargetArg string
 	Piped     bool
@@ -19,49 +18,68 @@ type Plan struct {
 	Command   []string
 }
 
+type Command struct {
+	Task               string
+	WorkDir            string
+	Mode               string
+	SessionID          string
+	Backend            string
+	Model              string
+	ReasoningEffort    string
+	Agent              string
+	SkipPermissions    bool
+	Worktree           bool
+	AllowedTools       []string
+	DisallowedTools    []string
+	ExplicitStdin      bool
+	PromptFile         string
+	PromptFileExplicit bool
+	Skills             []string
+}
+
 type PrepareDeps struct {
-	ResolveTaskText      func(*config.Config) (string, bool, error)
-	ApplyPromptAndSkills func(*config.Config, string) (string, error)
+	ResolveTaskText      func(Command) (string, bool, error)
+	ApplyPromptAndSkills func(Command, string) (string, error)
 	ShouldUseStdin       func(string, bool) bool
-	BuildCommandArgs     func(*config.Config, string) []string
+	BuildCommandArgs     func(Command, string) []string
 }
 
 type ExecuteDeps struct {
-	ExecuteTaskLayers func(context.Context, [][]executor.TaskSpec, int, func(executor.TaskSpec, int) executor.TaskResult) []executor.TaskResult
-	RunTask           func(executor.TaskSpec, int) executor.TaskResult
-	EnrichResults     func([]executor.TaskResult)
+	ExecuteTaskLayers func(context.Context, [][]Spec, int, func(Spec, int) domaintask.TaskResult) []domaintask.TaskResult
+	RunTask           func(Spec, int) domaintask.TaskResult
+	EnrichResults     func([]domaintask.TaskResult)
 }
 
-func PreparePlan(cfg *config.Config, deps PrepareDeps) (Plan, error) {
-	taskText, piped, err := deps.ResolveTaskText(cfg)
+func PreparePlan(cmd Command, deps PrepareDeps) (Plan, error) {
+	taskText, piped, err := deps.ResolveTaskText(cmd)
 	if err != nil {
 		return Plan{}, err
 	}
 
-	taskText, err = deps.ApplyPromptAndSkills(cfg, taskText)
+	taskText, err = deps.ApplyPromptAndSkills(cmd, taskText)
 	if err != nil {
 		return Plan{}, err
 	}
 
-	useStdin := cfg.ExplicitStdin || deps.ShouldUseStdin(taskText, piped)
+	useStdin := cmd.ExplicitStdin || deps.ShouldUseStdin(taskText, piped)
 	targetArg := taskText
 	if useStdin {
 		targetArg = "-"
 	}
 
-	taskSpec := executor.TaskSpec{
+	taskSpec := Spec{
 		Task:            taskText,
-		WorkDir:         cfg.WorkDir,
-		Mode:            cfg.Mode,
-		SessionID:       cfg.SessionID,
-		Backend:         cfg.Backend,
-		Model:           cfg.Model,
-		ReasoningEffort: cfg.ReasoningEffort,
-		Agent:           cfg.Agent,
-		SkipPermissions: cfg.SkipPermissions,
-		Worktree:        cfg.Worktree,
-		AllowedTools:    cfg.AllowedTools,
-		DisallowedTools: cfg.DisallowedTools,
+		WorkDir:         cmd.WorkDir,
+		Mode:            cmd.Mode,
+		SessionID:       cmd.SessionID,
+		Backend:         cmd.Backend,
+		Model:           cmd.Model,
+		ReasoningEffort: cmd.ReasoningEffort,
+		Agent:           cmd.Agent,
+		SkipPermissions: cmd.SkipPermissions,
+		Worktree:        cmd.Worktree,
+		AllowedTools:    cmd.AllowedTools,
+		DisallowedTools: cmd.DisallowedTools,
 		UseStdin:        useStdin,
 	}
 
@@ -71,17 +89,17 @@ func PreparePlan(cfg *config.Config, deps PrepareDeps) (Plan, error) {
 		TargetArg: targetArg,
 		Piped:     piped,
 		UseStdin:  useStdin,
-		Explicit:  cfg.ExplicitStdin,
-		Command:   deps.BuildCommandArgs(cfg, targetArg),
+		Explicit:  cmd.ExplicitStdin,
+		Command:   deps.BuildCommandArgs(cmd, targetArg),
 	}, nil
 }
 
-func ExecutePlan(parentCtx context.Context, plan Plan, deps ExecuteDeps) (executor.TaskResult, error) {
-	results := deps.ExecuteTaskLayers(parentCtx, [][]executor.TaskSpec{{plan.TaskSpec}}, 1, func(task executor.TaskSpec, timeout int) executor.TaskResult {
+func ExecutePlan(parentCtx context.Context, plan Plan, deps ExecuteDeps) (domaintask.TaskResult, error) {
+	results := deps.ExecuteTaskLayers(parentCtx, [][]Spec{{plan.TaskSpec}}, 1, func(task Spec, timeout int) domaintask.TaskResult {
 		return deps.RunTask(task, timeout)
 	})
 	if len(results) != 1 {
-		return executor.TaskResult{}, fmt.Errorf("unexpected single-task result count: %d", len(results))
+		return domaintask.TaskResult{}, fmt.Errorf("unexpected single-task result count: %d", len(results))
 	}
 	deps.EnrichResults(results)
 	return results[0], nil

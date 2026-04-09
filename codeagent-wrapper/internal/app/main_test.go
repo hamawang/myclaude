@@ -20,6 +20,7 @@ import (
 	"time"
 
 	config "codeagent-wrapper/internal/config"
+	domaintask "codeagent-wrapper/internal/domain/task"
 	executor "codeagent-wrapper/internal/executor"
 
 	"github.com/goccy/go-json"
@@ -3286,7 +3287,7 @@ func TestRunSilentMode(t *testing.T) {
 	_ = executor.SetNewCommandRunner(func(ctx context.Context, name string, args ...string) executor.CommandRunner {
 		return newFakeCmd(fakeCmdConfig{
 			StdoutPlan: []fakeStdoutEvent{{Data: jsonOutput + "\n"}},
-			WaitDelay: 5 * time.Millisecond,
+			WaitDelay:  5 * time.Millisecond,
 		})
 	})
 
@@ -3381,7 +3382,7 @@ func TestRunGenerateFinalOutput_LogPath(t *testing.T) {
 }
 
 func TestRunTopologicalSort_LinearChain(t *testing.T) {
-	tasks := []TaskSpec{{ID: "a"}, {ID: "b", Dependencies: []string{"a"}}, {ID: "c", Dependencies: []string{"b"}}}
+	tasks := []domaintask.TaskSpec{{ID: "a"}, {ID: "b", Dependencies: []string{"a"}}, {ID: "c", Dependencies: []string{"b"}}}
 	layers, err := topologicalSort(tasks)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -3392,7 +3393,7 @@ func TestRunTopologicalSort_LinearChain(t *testing.T) {
 }
 
 func TestRunTopologicalSort_Branching(t *testing.T) {
-	tasks := []TaskSpec{{ID: "root"}, {ID: "left", Dependencies: []string{"root"}}, {ID: "right", Dependencies: []string{"root"}}, {ID: "leaf", Dependencies: []string{"left", "right"}}}
+	tasks := []domaintask.TaskSpec{{ID: "root"}, {ID: "left", Dependencies: []string{"root"}}, {ID: "right", Dependencies: []string{"root"}}, {ID: "leaf", Dependencies: []string{"left", "right"}}}
 	layers, err := topologicalSort(tasks)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -3403,7 +3404,7 @@ func TestRunTopologicalSort_Branching(t *testing.T) {
 }
 
 func TestParallelTopologicalSortTasks(t *testing.T) {
-	tasks := []TaskSpec{{ID: "a"}, {ID: "b"}, {ID: "c"}}
+	tasks := []domaintask.TaskSpec{{ID: "a"}, {ID: "b"}, {ID: "c"}}
 	layers, err := topologicalSort(tasks)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -3414,21 +3415,21 @@ func TestParallelTopologicalSortTasks(t *testing.T) {
 }
 
 func TestRunTopologicalSort_CycleDetection(t *testing.T) {
-	tasks := []TaskSpec{{ID: "a", Dependencies: []string{"b"}}, {ID: "b", Dependencies: []string{"a"}}}
+	tasks := []domaintask.TaskSpec{{ID: "a", Dependencies: []string{"b"}}, {ID: "b", Dependencies: []string{"a"}}}
 	if _, err := topologicalSort(tasks); err == nil || !strings.Contains(err.Error(), "cycle detected") {
 		t.Fatalf("expected cycle error, got %v", err)
 	}
 }
 
 func TestRunTopologicalSort_IndirectCycle(t *testing.T) {
-	tasks := []TaskSpec{{ID: "a", Dependencies: []string{"c"}}, {ID: "b", Dependencies: []string{"a"}}, {ID: "c", Dependencies: []string{"b"}}}
+	tasks := []domaintask.TaskSpec{{ID: "a", Dependencies: []string{"c"}}, {ID: "b", Dependencies: []string{"a"}}, {ID: "c", Dependencies: []string{"b"}}}
 	if _, err := topologicalSort(tasks); err == nil || !strings.Contains(err.Error(), "cycle detected") {
 		t.Fatalf("expected cycle error, got %v", err)
 	}
 }
 
 func TestRunTopologicalSort_MissingDependency(t *testing.T) {
-	tasks := []TaskSpec{{ID: "a", Dependencies: []string{"missing"}}}
+	tasks := []domaintask.TaskSpec{{ID: "a", Dependencies: []string{"missing"}}}
 	if _, err := topologicalSort(tasks); err == nil || !strings.Contains(err.Error(), "dependency \"missing\" not found") {
 		t.Fatalf("expected missing dependency error, got %v", err)
 	}
@@ -3436,15 +3437,15 @@ func TestRunTopologicalSort_MissingDependency(t *testing.T) {
 
 func TestRunTopologicalSort_LargeGraph(t *testing.T) {
 	const count = 200
-	tasks := make([]TaskSpec, count)
+	tasks := make([]domaintask.TaskSpec, count)
 	for i := 0; i < count; i++ {
 		id := fmt.Sprintf("task-%d", i)
 		if i == 0 {
-			tasks[i] = TaskSpec{ID: id}
+			tasks[i] = domaintask.TaskSpec{ID: id}
 			continue
 		}
 		prev := fmt.Sprintf("task-%d", i-1)
-		tasks[i] = TaskSpec{ID: id, Dependencies: []string{prev}}
+		tasks[i] = domaintask.TaskSpec{ID: id, Dependencies: []string{prev}}
 	}
 
 	layers, err := topologicalSort(tasks)
@@ -4619,7 +4620,7 @@ func TestRun_ExplicitStdinReadError(t *testing.T) {
 	if exitCode != 1 {
 		t.Fatalf("exit code %d, want 1", exitCode)
 	}
-	if !strings.Contains(logOutput, "Failed to read stdin: broken stdin") {
+	if !strings.Contains(logOutput, "failed to read stdin: broken stdin") {
 		t.Fatalf("log missing read error entry, got %q", logOutput)
 	}
 	// Log file should remain for inspection; cleanup is handled via `codeagent-wrapper cleanup`.
@@ -4761,7 +4762,7 @@ func TestRun_PipedTaskReadError(t *testing.T) {
 	if exitCode != 1 {
 		t.Fatalf("exit=%d, want 1", exitCode)
 	}
-	if !strings.Contains(logOutput, "Failed to read piped stdin: read stdin: pipe failure") {
+	if !strings.Contains(logOutput, "failed to read piped stdin: read stdin: pipe failure") {
 		t.Fatalf("log missing piped read error, got %q", logOutput)
 	}
 	// Log file should remain for inspection; cleanup is handled via `codeagent-wrapper cleanup`.

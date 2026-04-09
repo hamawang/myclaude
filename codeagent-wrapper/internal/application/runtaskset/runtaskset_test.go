@@ -4,7 +4,8 @@ import (
 	"context"
 	"testing"
 
-	executor "codeagent-wrapper/internal/executor"
+	appruntask "codeagent-wrapper/internal/application/runtask"
+	domaintask "codeagent-wrapper/internal/domain/task"
 )
 
 func TestBuildPlanAppliesGlobalDefaults(t *testing.T) {
@@ -18,11 +19,11 @@ func TestBuildPlanAppliesGlobalDefaults(t *testing.T) {
 		MaxWorkers:      10,
 	}, BuildDeps{
 		ResolveBackendName: func(name string) (string, error) { return name, nil },
-		ParseConfig: func([]byte) (*executor.ParallelConfig, error) {
-			return &executor.ParallelConfig{Tasks: []executor.TaskSpec{{ID: "a", Task: "body"}}}, nil
+		ParseConfig: func([]byte) (*ParallelConfig, error) {
+			return &ParallelConfig{Tasks: []appruntask.Spec{{ID: "a", Task: "body"}}}, nil
 		},
-		TopologicalSort: func(tasks []executor.TaskSpec) ([][]executor.TaskSpec, error) {
-			return [][]executor.TaskSpec{tasks}, nil
+		TopologicalSort: func(tasks []domaintask.TaskSpec) ([][]domaintask.TaskSpec, error) {
+			return [][]domaintask.TaskSpec{tasks}, nil
 		},
 	})
 	if err != nil {
@@ -36,14 +37,14 @@ func TestBuildPlanAppliesGlobalDefaults(t *testing.T) {
 func TestRunPlanWritesAndRendersResults(t *testing.T) {
 	out, exitCode, err := RunPlan(context.Background(), Plan{
 		SummaryOnly: true,
-		Layers:      [][]executor.TaskSpec{{{ID: "a"}}},
+		Layers:      [][]appruntask.Spec{{{ID: "a"}}},
 		MaxWorkers:  2,
 	}, RunDeps{
-		ExecuteConcurrent: func(context.Context, [][]executor.TaskSpec, int, int) []executor.TaskResult {
-			return []executor.TaskResult{{TaskID: "a", ExitCode: 0, Message: "ok"}}
+		ExecuteConcurrent: func(context.Context, [][]appruntask.Spec, int) []domaintask.TaskResult {
+			return []domaintask.TaskResult{{TaskID: "a", ExitCode: 0, Message: "ok"}}
 		},
-		EnrichResults: func([]executor.TaskResult) {},
-		RenderFinalOutputWithMode: func(results []executor.TaskResult, summaryOnly bool) string {
+		EnrichResults: func([]domaintask.TaskResult) {},
+		RenderFinalOutputWithMode: func(results []domaintask.TaskResult, summaryOnly bool) string {
 			if !summaryOnly || len(results) != 1 || results[0].TaskID != "a" {
 				t.Fatalf("unexpected render args: %#v summaryOnly=%v", results, summaryOnly)
 			}
